@@ -28,7 +28,6 @@ import type {
 export {
   checkTokenBucketLimit,
   deductUsage,
-  refundUsage,
   initProratedBucket,
   calculateProratedCredits,
   getTeamMemberConsumed,
