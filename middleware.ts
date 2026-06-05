@@ -1,4 +1,4 @@
-import { authkit } from "@workos-inc/authkit-nextjs";
+import { authKitMiddleware } from "@workos-inc/authkit-nextjs";
 import { NextRequest, NextResponse, NextFetchEvent } from "next/server";
 import { isRateLimitError } from "@/lib/api/response";
 import {
@@ -92,16 +92,16 @@ function withReferralCookie(
   return response;
 }
 
-export default async function middleware(
-  request: NextRequest,
-  _event: NextFetchEvent,
-) {
+// ഇവിടെ പുതിയ authKitMiddleware രീതിയിലേക്ക് മാറ്റിയിരിക്കുന്നു
+export default authKitMiddleware({
+  redirectUri: getRedirectUri(),
+  eagerAuth: true,
+})(async (auth, request) => {
   const pathname = request.nextUrl.pathname;
 
-  // Desktop app: redirect unauthenticated users to desktop-specific error page
+  // Desktop app check
   if (isDesktopApp(request)) {
     const hasSession = request.cookies.has("wos-session");
-
     if (!hasSession && !isUnauthenticatedPath(pathname)) {
       return withReferralCookie(
         request,
@@ -112,55 +112,12 @@ export default async function middleware(
     }
   }
 
-  let refreshHitRateLimit = false;
-  const hadSessionCookie = request.cookies.has("wos-session");
+  const { user } = auth;
 
-  const { session, headers, authorizationUrl } = await authkit(request, {
-    redirectUri: getRedirectUri(),
-    eagerAuth: true,
-    onSessionRefreshError: ({ error }) => {
-      if (isRateLimitError(error)) {
-        refreshHitRateLimit = true;
-        console.warn(
-          "[Auth Middleware] WorkOS rate limit hit during session refresh",
-        );
-      }
-    },
-  });
-
-  const requestHeaders = buildRequestHeaders(request, headers);
-  const responseHeaders = buildResponseHeaders(headers);
-
-  if (session.user || isUnauthenticatedPath(pathname)) {
+  if (user || isUnauthenticatedPath(pathname)) {
     return withReferralCookie(
       request,
-      NextResponse.next({
-        request: { headers: requestHeaders },
-        headers: responseHeaders,
-      }),
-    );
-  }
-
-  // If rate-limited (not a real session expiry), don't redirect to login
-  if (hadSessionCookie && refreshHitRateLimit) {
-    if (!isBrowserRequest(request)) {
-      const rateLimitHeaders = new Headers(responseHeaders);
-      rateLimitHeaders.set("Retry-After", "5");
-      return withReferralCookie(
-        request,
-        NextResponse.json(
-          { code: "rate_limited", message: "Please retry shortly." },
-          { status: 503, headers: rateLimitHeaders },
-        ),
-      );
-    }
-    // For browser requests, let through rather than forcing a confusing login redirect
-    return withReferralCookie(
-      request,
-      NextResponse.next({
-        request: { headers: requestHeaders },
-        headers: responseHeaders,
-      }),
+      NextResponse.next(),
     );
   }
 
@@ -173,54 +130,21 @@ export default async function middleware(
           message: "You need to sign in before continuing.",
           cause: "Session expired or invalid",
         },
-        { status: 401, headers: responseHeaders },
+        { status: 401 },
       ),
     );
   }
 
-  if (!authorizationUrl) {
-    console.error("[Auth Middleware] authorizationUrl unavailable", {
-      pathname,
-      hasSession: !!session.user,
-    });
-    const errorUrl = new URL("/auth-error", request.url);
-    errorUrl.searchParams.set("code", "503");
-    return withReferralCookie(
-      request,
-      NextResponse.redirect(errorUrl, { headers: responseHeaders }),
-    );
-  }
-
+  // ലോഗിൻ ചെയ്തിട്ടില്ലെങ്കിൽ WorkOS ഓഥറൈസേഷൻ യുആർഎല്ലിലേക്ക് റീഡയറക്ട് ചെയ്യുന്നു
   return withReferralCookie(
     request,
-    NextResponse.redirect(authorizationUrl, { headers: responseHeaders }),
+    NextResponse.redirect(auth.getAuthorizationUrl()),
   );
-}
-
-function buildRequestHeaders(
-  request: NextRequest,
-  authkitHeaders: Headers,
-): Headers {
-  const merged = new Headers(request.headers);
-  authkitHeaders.forEach((value, key) => {
-    if (key.startsWith("x-")) {
-      merged.set(key, value);
-    }
-  });
-  return merged;
-}
-
-function buildResponseHeaders(authkitHeaders: Headers): Headers {
-  const responseHeaders = new Headers(authkitHeaders);
-  responseHeaders.delete(SESSION_HEADER);
-  return responseHeaders;
-}
+});
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files, unless found in search params
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    // Always run for API routes
     "/(api|trpc)(.*)",
   ],
 };
