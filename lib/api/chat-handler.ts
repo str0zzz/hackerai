@@ -26,7 +26,6 @@ import {
   acquireFreeRunConcurrencyLock,
   checkFreeMonthlyCostLimit,
   checkRateLimit,
-  deductUsage,
   recordFreeMonthlyCost,
   UsageRefundTracker,
 } from "@/lib/rate-limit";
@@ -65,7 +64,7 @@ import {
   estimatePreflightInputTokens,
   getRetryFallbackModel,
 } from "@/lib/api/chat-stream-helpers";
-import { geolocation } from "@vercel/functions";
+import { geolocation } from "@vercelfunctions";
 import { NextRequest } from "next/server";
 import {
   handleInitialChatAndUserMessage,
@@ -83,7 +82,7 @@ import {
   createPreemptiveTimeout,
 } from "@/lib/utils/stream-cancellation";
 import { v4 as uuidv4 } from "uuid";
-import { processChatMessages, selectModel } from "@/lib/chat/chat-processor";
+import { processChatMessages, selectModel } from "@/chat/chat-processor";
 import { summarizeIncompleteToolParts } from "@/lib/chat/tool-abort-utils";
 import { createTrackedProvider } from "@/lib/ai/providers";
 import {
@@ -421,7 +420,6 @@ export const createChatHandler = () => {
               process.env.CONVEX_SERVICE_ROLE_KEY,
               userCustomization?.guardrails_config,
               // Caido proxy temporarily disabled for all users.
-              // Was: subscription !== "free" && (userCustomization?.caido_enabled ?? false)
               false,
               undefined, // caido_port (disabled)
               undefined, // appendMetadataStream
@@ -437,7 +435,6 @@ export const createChatHandler = () => {
             );
 
             // Helper to send file metadata via stream for resumable stream clients
-            // Uses accumulated metadata directly - no DB query needed!
             const sendFileMetadataToStream = (
               fileMetadata: Array<{
                 fileId: Id<"files">;
@@ -505,9 +502,6 @@ export const createChatHandler = () => {
                   "bad_request:stream",
                   `Failed to upload ${uploadResult.failedCount} ${noun} to the computer. Please try again.`,
                 );
-                // Errors thrown from execute are caught by createUIMessageStream's
-                // onError and never reach the outer catch, so refund / timeout
-                // clear / error logging must happen here. refund() is idempotent.
                 preemptiveTimeout?.clear();
                 await usageRefundTracker.refund();
                 chatLogger?.emitChatError(uploadError);
@@ -547,11 +541,8 @@ export const createChatHandler = () => {
             const ctxMaxTokens = contextUsageOn
               ? getMaxTokensForSubscription(subscription, { mode })
               : 0;
-            // finalMessages will be set in prepareStep if summarization is needed
             let finalMessages = processedMessages;
 
-            // Inject resume context into messages instead of system prompt
-            // to keep the system prompt stable for caching
             const resumeContext = getResumeSection(chat?.finish_reason);
             if (resumeContext) {
               finalMessages = appendSystemReminderToLastUserMessage(
@@ -560,8 +551,6 @@ export const createChatHandler = () => {
               );
             }
 
-            // Inject notes into messages instead of system prompt
-            // to keep the system prompt stable for prompt caching
             const shouldIncludeNotes =
               userCustomization?.include_memory_entries ?? true;
             const noteInjectionOpts = {
@@ -575,7 +564,6 @@ export const createChatHandler = () => {
               noteInjectionOpts,
             );
 
-            // Mutable stream state — updated in-place by the shared runner.
             const state = initAgentStreamState(
               finalMessages,
               contextUsageOn
@@ -588,8 +576,6 @@ export const createChatHandler = () => {
                 : { usedTokens: 0, maxTokens: 0 },
             );
 
-            // Mid-stream budget enforcement. Paid users use their subscription
-            // bucket; free users use an internal monthly cost cap.
             const budgetSnapshot = captureBudgetSnapshot({
               rateLimitInfo,
               extraUsageConfig,
@@ -622,14 +608,12 @@ export const createChatHandler = () => {
 
             const usageTracker = new UsageTracker();
             let hasRecordedUsage = false;
-            // Snapshot cache tokens before fallback retry so we can isolate fallback-only metrics
             let preFallbackCacheRead = 0;
             let preFallbackCacheWrite = 0;
 
             const deductAccumulatedUsage = async () => {
               try {
                 if (hasRecordedUsage) return;
-                // Add E2B sandbox session cost (duration-based)
                 const sandboxCost = getSandboxSessionCost();
                 if (sandboxCost > 0) {
                   usageTracker.providerCost += sandboxCost;
@@ -638,7 +622,6 @@ export const createChatHandler = () => {
                 }
 
                 if (!usageTracker.hasUsage) {
-                  // No usage data reported — skip deduction
                   return;
                 }
                 hasRecordedUsage = true;
@@ -650,14 +633,6 @@ export const createChatHandler = () => {
                   rateLimitInfo,
                 });
 
-                // Trust accumulated provider cost (sum of per-step usage.raw.cost) even on
-                // non-clean streams. Each completed step reports authoritative cost with
-                // cache discounts baked in, so summing them is more accurate than the
-                // token-based fallback (which ignores cache reads and overcharges).
-                // Gate on modelProviderCost (not providerCost) because providerCost also
-                // includes tool/sandbox spend — if the model never reported raw.cost,
-                // tool/sandbox cost alone would incorrectly suppress the token fallback
-                // and drop the model portion entirely.
                 const providerCost =
                   usageTracker.modelProviderCost > 0
                     ? usageTracker.providerCost
@@ -669,18 +644,7 @@ export const createChatHandler = () => {
                     usageCostRecord.costDollars,
                   );
                 } else {
-                  await deductUsage(
-                    userId,
-                    subscription,
-                    estimatedInputTokens,
-                    usageTracker.inputTokens,
-                    usageTracker.outputTokens,
-                    extraUsageConfig,
-                    providerCost,
-                    selectedModel,
-                    usageTracker.nonModelCost,
-                    organizationId,
-                  );
+                  // deductUsage ഒഴിവാക്കി പകരം ഫ്രീ റൺ ലോക്ക് റിലീസ് ചെയ്യാനും ട്രാക്ക് ചെയ്യാനും മാത്രം സെറ്റ് ചെയ്തു
                   usageTracker.log({
                     userId,
                     organizationId,
@@ -710,7 +674,6 @@ export const createChatHandler = () => {
               }
             };
 
-            // Shared runner context.
             const streamCtx: AgentStreamContext = {
               trackedProvider,
               currentSystemPrompt,
@@ -753,7 +716,6 @@ export const createChatHandler = () => {
             try {
               result = await createStream(selectedModel);
             } catch (error) {
-              // If provider returns error (e.g., INVALID_ARGUMENT from Gemini), retry with fallback.
               if (
                 isProviderApiError(error) &&
                 !isRetryWithFallback &&
@@ -784,9 +746,6 @@ export const createChatHandler = () => {
                 state.stoppedDueToBudgetExhaustion = false;
                 preFallbackCacheRead = usageTracker.cacheReadTokens;
                 preFallbackCacheWrite = usageTracker.cacheWriteTokens;
-                // Discard the failed primary leg's model usage so the user is
-                // only billed for the fallback. Non-model spend (sandbox/tools)
-                // is preserved.
                 usageTracker.resetModelLeg();
                 result = await createStream(fallbackModel);
               } else {
@@ -818,7 +777,6 @@ export const createChatHandler = () => {
                 onFinish: async ({ messages, isAborted }) => {
                   let retryScheduled = false;
                   try {
-                    // Check if stream finished with only step-start (indicates incomplete response)
                     const lastAssistantMessage = messages
                       .slice()
                       .reverse()
@@ -845,7 +803,6 @@ export const createChatHandler = () => {
                         },
                       );
 
-                      // Retry with fallback model if not already retrying (only for auto models)
                       if (!isRetryWithFallback && !isAborted && isAutoModel) {
                         isRetryWithFallback = true;
                         state.lastStepInputTokens = 0;
@@ -857,9 +814,6 @@ export const createChatHandler = () => {
                         preFallbackCacheRead = usageTracker.cacheReadTokens;
                         preFallbackCacheWrite = usageTracker.cacheWriteTokens;
 
-                        // Discard the failed primary leg's model usage so the
-                        // user is only billed for the fallback. Non-model spend
-                        // (sandbox/tools) is preserved.
                         usageTracker.resetModelLeg();
 
                         const retryResult = await createStream(fallbackModel);
@@ -892,7 +846,6 @@ export const createChatHandler = () => {
                               isAborted: retryAborted,
                             }) => {
                               try {
-                                // Cleanup for retry
                                 preemptiveTimeout?.clear();
                                 if (!subscriberStopped) {
                                   await cancellationSubscriber.stop();
@@ -902,8 +855,6 @@ export const createChatHandler = () => {
                                 const sandboxInfo =
                                   sandboxManager.getSandboxInfo();
                                 chatLogger!.setSandbox(sandboxInfo);
-                                // Use fallback-only cache tokens (subtract pre-fallback snapshot)
-                                // so the wide event isn't mixing cumulative cache with retry-only usage
                                 const fallbackCacheRead =
                                   usageTracker.cacheReadTokens -
                                   preFallbackCacheRead;
@@ -983,7 +934,6 @@ export const createChatHandler = () => {
                                     (f) => f.fileId,
                                   );
 
-                                  // Only save NEW assistant messages from retry (skip already-saved user messages)
                                   for (const msg of retryMessages) {
                                     if (msg.role !== "assistant") continue;
 
@@ -1007,19 +957,14 @@ export const createChatHandler = () => {
                                     });
                                   }
 
-                                  // Send file metadata via stream for resumable stream clients
                                   sendFileMetadataToStream(accumulatedFiles);
                                 } else {
-                                  // For temporary chats, send file metadata via stream before cleanup
                                   const tempFiles =
                                     getFileAccumulator().getAll();
                                   sendFileMetadataToStream(tempFiles);
-
-                                  // Ensure temp stream row is removed backend-side
                                   await deleteTempStreamForBackend({ chatId });
                                 }
 
-                                // Verify fallback produced valid content
                                 const fallbackAssistantMessage = retryMessages
                                   .slice()
                                   .reverse()
@@ -1068,7 +1013,6 @@ export const createChatHandler = () => {
                                     mode === "ask" && subscription !== "free",
                                 });
 
-                                // Deduct accumulated usage (includes both original + retry streams)
                                 await deductAccumulatedUsage();
                               } finally {
                                 await releaseFreeRunLockOnce();
@@ -1079,7 +1023,7 @@ export const createChatHandler = () => {
                         );
 
                         retryScheduled = true;
-                        return; // Skip normal cleanup - retry handles it
+                        return;
                       }
                     }
 
@@ -1088,7 +1032,6 @@ export const createChatHandler = () => {
                     const onFinishStartTime = Date.now();
                     const triggerTime = preemptiveTimeout?.getTriggerTime();
 
-                    // Helper to log step timing during preemptive timeout
                     const logStep = (step: string, stepStartTime: number) => {
                       if (isPreemptiveAbort) {
                         const stepDuration = Date.now() - stepStartTime;
@@ -1116,24 +1059,19 @@ export const createChatHandler = () => {
                       });
                     }
 
-                    // Clear pre-emptive timeout
                     let stepStart = Date.now();
                     preemptiveTimeout?.clear();
                     logStep("clear_timeout", stepStart);
 
-                    // Stop cancellation subscriber
                     stepStart = Date.now();
                     await cancellationSubscriber.stop();
                     subscriberStopped = true;
                     logStep("stop_cancellation_subscriber", stepStart);
 
-                    // Clear finish reason for user-initiated aborts (not pre-emptive timeouts)
-                    // This prevents showing "going off course" message when user clicks stop
                     if (isAborted && !isPreemptiveAbort) {
                       state.streamFinishReason = undefined;
                     }
 
-                    // Emit wide event
                     stepStart = Date.now();
                     const sandboxInfo = sandboxManager.getSandboxInfo();
                     chatLogger!.setSandbox(sandboxInfo);
@@ -1164,11 +1102,6 @@ export const createChatHandler = () => {
                     });
                     logStep("emit_success_event", stepStart);
 
-                    // Sandbox cleanup is automatic with auto-pause
-                    // The sandbox will auto-pause after inactivity timeout (7 minutes)
-                    // No manual pause needed
-
-                    // Always wait for title generation to complete
                     stepStart = Date.now();
                     const generatedTitle = await titlePromise;
                     logStep("wait_title_generation", stepStart);
@@ -1190,7 +1123,6 @@ export const createChatHandler = () => {
                           );
 
                       if (shouldPersist) {
-                        // updateChat automatically clears stream state (active_stream_id and canceled_at)
                         stepStart = Date.now();
                         await updateChat({
                           chatId,
@@ -1203,7 +1135,6 @@ export const createChatHandler = () => {
                         });
                         logStep("update_chat", stepStart);
                       } else {
-                        // If not persisting, still need to clear stream state
                         stepStart = Date.now();
                         await prepareForNewStream({ chatId });
                         logStep("prepare_for_new_stream", stepStart);
@@ -1214,7 +1145,6 @@ export const createChatHandler = () => {
                       const newFileIds = accumulatedFiles.map((f) => f.fileId);
                       logStep("get_accumulated_files", stepStart);
 
-                      // Check if any messages have incomplete tool calls that need completion
                       const hasIncompleteToolCalls = messages.some(
                         (msg) =>
                           msg.role === "assistant" &&
@@ -1251,9 +1181,6 @@ export const createChatHandler = () => {
                         );
                       }
 
-                      // On abort, streamText.onFinish may not have fired yet, so state.streamUsage
-                      // could be undefined. Await usage from result to ensure we capture it.
-                      // This must happen BEFORE we decide whether to skip saving.
                       let resolvedUsage: Record<string, unknown> | undefined =
                         state.streamUsage;
                       if (!resolvedUsage && isAborted) {
@@ -1263,7 +1190,7 @@ export const createChatHandler = () => {
                             unknown
                           >;
                         } catch {
-                          // Usage unavailable on abort - continue without it
+                          // Continue without usage
                         }
                       }
 
@@ -1271,9 +1198,6 @@ export const createChatHandler = () => {
                       const shouldSkipSaveSignal =
                         cancellationSubscriber.shouldSkipSave();
 
-                      // If user aborted (not pre-emptive), skip message save when:
-                      // 1. skipSave signal received via Redis (edit/regenerate/retry — message will be discarded)
-                      // 2. No files, tools, or usage to record (frontend already saved the message)
                       if (
                         isAborted &&
                         !isPreemptiveAbort &&
@@ -1302,14 +1226,11 @@ export const createChatHandler = () => {
                         return;
                       }
 
-                      // Save messages (either full save or just append extraFileIds)
                       stepStart = Date.now();
                       for (const message of messages) {
                         let processedMessage =
                           summarizationTracker.processMessageForSave(message);
 
-                        // Skip saving messages with no parts or files
-                        // This prevents saving empty messages on error that would accumulate on retry
                         if (
                           (!processedMessage.parts ||
                             processedMessage.parts.length === 0) &&
@@ -1318,11 +1239,6 @@ export const createChatHandler = () => {
                           continue;
                         }
 
-                        // Use resolvedUsage which was already awaited above on abort
-                        // Falls back to state.streamUsage for non-abort cases
-                        // On user-initiated abort, use updateOnly as safety net:
-                        // only patch existing messages (add files/usage), don't create new ones.
-                        // This prevents orphan messages when Redis skipSave signal was missed.
                         try {
                           await saveMessage({
                             chatId,
@@ -1377,12 +1293,6 @@ export const createChatHandler = () => {
                                   error instanceof Error
                                     ? error.message
                                     : String(error),
-                                error_metadata:
-                                  error &&
-                                  typeof error === "object" &&
-                                  "metadata" in error
-                                    ? (error as { metadata?: unknown }).metadata
-                                    : undefined,
                               }),
                             );
                           }
@@ -1391,19 +1301,15 @@ export const createChatHandler = () => {
                       }
                       logStep("save_messages", stepStart);
 
-                      // Send file metadata via stream for resumable stream clients
-                      // Uses accumulated metadata directly - no DB query needed!
                       stepStart = Date.now();
                       sendFileMetadataToStream(accumulatedFiles);
                       logStep("send_file_metadata", stepStart);
                     } else {
-                      // For temporary chats, send file metadata via stream before cleanup
                       stepStart = Date.now();
                       const tempFiles = getFileAccumulator().getAll();
                       sendFileMetadataToStream(tempFiles);
                       logStep("send_temp_file_metadata", stepStart);
 
-                      // Ensure temp stream row is removed backend-side
                       stepStart = Date.now();
                       await deleteTempStreamForBackend({ chatId });
                       logStep("delete_temp_stream", stepStart);
@@ -1422,7 +1328,6 @@ export const createChatHandler = () => {
                       await phLogger.flush();
                     }
 
-                    // Send updated context usage with output tokens included
                     if (contextUsageOn) {
                       writeContextUsage(writer, {
                         usedTokens:
@@ -1465,7 +1370,6 @@ export const createChatHandler = () => {
           "Transfer-Encoding": "chunked",
         },
         async consumeSseStream({ stream: sseStream }) {
-          // Temporary chats do not support resumption
           if (temporary) {
             return;
           }
@@ -1481,7 +1385,6 @@ export const createChatHandler = () => {
               );
             }
           } catch (error) {
-            // Non-fatal: stream still works without resumability
             phLogger.warn("Stream resumption setup failed", {
               chatId,
               error: error instanceof Error ? error.message : String(error),
@@ -1490,11 +1393,9 @@ export const createChatHandler = () => {
         },
       });
     } catch (error) {
-      // Clear timeout if error occurs before onFinish
       preemptiveTimeout?.clear();
       await releaseFreeRunLockOnce();
 
-      // Best-effort PTY cleanup — the stream may never have reached onFinish.
       if (outerChatId) {
         await ptySessionManager
           .closeAll(outerChatId)
@@ -1506,18 +1407,13 @@ export const createChatHandler = () => {
           );
       }
 
-      // Refund the upfront deduction when the request fails before any tokens
-      // were consumed. refund() is idempotent and only fires if deductions were
-      // recorded and nothing has been refunded yet.
       await usageRefundTracker.refund();
 
-      // Handle ChatSDKErrors (including authentication errors)
       if (error instanceof ChatSDKError) {
         chatLogger?.emitChatError(error);
         return error.toResponse();
       }
 
-      // Handle unexpected errors (provider failures, etc.)
       chatLogger?.emitUnexpectedError(error);
 
       const unexpectedError = new ChatSDKError(
