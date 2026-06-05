@@ -3,11 +3,6 @@ import { stripe } from "@/app/api/stripe";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import Stripe from "stripe";
-import {
-  popOldBucketRemaining,
-  initProratedBucket,
-  clearOrgRemovedUsage,
-} from "@/lib/rate-limit";
 import { phLogger } from "@/lib/posthog/server";
 import { resolveUserIdsFromCustomer as resolveStripeCustomerUsers } from "@/lib/billing/resolve-customer-users";
 import { getInvoicePaidBucketResetMode } from "@/lib/billing/subscription-invoice-reset";
