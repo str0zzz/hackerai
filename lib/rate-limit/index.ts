@@ -30,7 +30,6 @@ export {
   deductUsage,
   refundUsage,
   resetRateLimitBuckets,
-  stashOldBucketRemaining,
   popOldBucketRemaining,
   initProratedBucket,
   calculateProratedCredits,
