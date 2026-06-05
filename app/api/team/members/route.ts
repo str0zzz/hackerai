@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { workos } from "../../workos";
 import { stripe } from "../../stripe";
-import { getTeamMemberConsumed, addOrgRemovedUsage } from "@/lib/rate-limit";
 import { requireTeamOrg } from "../team-auth";
 
 export const GET = async (req: NextRequest) => {
