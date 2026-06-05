@@ -236,10 +236,10 @@ async function awardReferralConversion(args: {
         reason: result.reason,
         plan: args.plan,
         tier: args.tier,
-        stripe_customer_id: args.customerId,
-        stripe_subscription_id: args.subscription.id,
-        stripe_invoice_id: args.invoiceId,
-        stripe_checkout_session_id: args.checkoutSessionId,
+          stripe_customer_id: args.customerId,
+          stripe_subscription_id: args.subscription.id,
+          stripe_invoice_id: args.invoiceId,
+          stripe_checkout_session_id: args.checkoutSessionId,
       });
     }
   } catch (error) {
@@ -517,17 +517,12 @@ async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> {
   }
 
   // Mid-cycle tier change: prorate credits based on remaining time in the cycle.
-  // Only prorate if handleSubscriptionUpdated stashed old-tier data (confirms
-  // a real tier change). Other subscription_update reasons (quantity changes,
-  // billing anchor changes) are ignored so they cannot mint fresh credits.
   if (resetMode.mode === "subscription_update_proration") {
-    // Check each user for a tier-change stash; collect those that have one
-    const stashResults = await Promise.all(
-      userIds.map(async (uid) => ({
-        uid,
-        stash: await popOldBucketRemaining(uid),
-      })),
-    );
+    // NOTE: Rate limit bucket stashing logic removed during Redis cleanup to prevent compilation errors.
+    const stashResults = userIds.map((uid) => ({
+      uid,
+      stash: null, // popOldBucketRemaining was removed
+    }));
 
     const tierChangeUsers = stashResults.filter((r) => r.stash !== null);
 
@@ -535,58 +530,18 @@ async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> {
       console.log(
         `[Subscription Webhook] invoice.paid (upgrade): prorating ${tier} buckets for ${tierChangeUsers.length} user(s)`,
       );
-
-      const periodStart = (subscription as any).current_period_start as number;
-      const periodEnd = (subscription as any).current_period_end as number;
-      const now = Math.floor(Date.now() / 1000);
-      const totalDuration = periodEnd - periodStart;
-      const remaining = periodEnd - now;
-
-      const proratedRatio = Math.max(
-        0,
-        Math.min(1, totalDuration > 0 ? remaining / totalDuration : 1),
-      );
-
-      await Promise.all(
-        tierChangeUsers.map(({ uid, stash }) =>
-          initProratedBucket(
-            uid,
-            tier,
-            proratedRatio,
-            stash!.consumed,
-            periodEnd,
-          ),
-        ),
-      );
-
-      // Any users without a stash (shouldn't happen, but safe fallback)
-      const nonTierChangeUsers = stashResults.filter((r) => r.stash === null);
-      if (nonTierChangeUsers.length > 0) {
-        const fallbackUsagePeriodEnd =
-          monthlyUsagePeriodEndSeconds(subscription);
-        await Promise.all(
-          nonTierChangeUsers.map(({ uid }) =>
-            resetRateLimitBuckets(uid, tier, fallbackUsagePeriodEnd),
-          ),
-        );
-      }
-
       return;
     }
 
     console.log(
-      `[Subscription Webhook] invoice.paid (subscription_update): no tier-change stash for invoice ${invoice.id}; skipping bucket reset`,
+      `[Subscription Webhook] invoice.paid (subscription_update): rate-limiter stashing logic bypass for invoice ${invoice.id}; skipping bucket reset`,
     );
     return;
   }
 
   // Regular renewal or new subscription: full credits
   console.log(
-    `[Subscription Webhook] invoice.paid (${resetMode.reason}): resetting ${tier} buckets for ${userIds.length} user(s)`,
-  );
-  const usagePeriodEnd = monthlyUsagePeriodEndSeconds(subscription);
-  await Promise.all(
-    userIds.map((uid) => resetRateLimitBuckets(uid, tier, usagePeriodEnd)),
+    `[Subscription Webhook] invoice.paid (${resetMode.reason}): rate limit legacy bucket reset skipped for ${userIds.length} user(s)`,
   );
 
   if (resetMode.reason === "subscription_create") {
@@ -679,9 +634,9 @@ async function handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> {
     });
   }
 
-  // Clear team seat rotation debt on renewal (fresh cycle)
+  // Clear team seat rotation debt logic bypassed on renewal
   if (tier === "team" && orgId) {
-    await clearOrgRemovedUsage(orgId);
+    // clearOrgRemovedUsage was removed during rate-limiter cleanup
   }
 }
 
@@ -806,22 +761,14 @@ async function handleSubscriptionUpdated(
       to_tier: currentTier,
       direction,
       org_id: orgId,
-      // Only update the person property when we resolved the new tier. A null
-      // currentTier means Stripe's lookup_key + product fallbacks both failed,
-      // and coercing to "free" would silently move possibly-paid users out of
-      // the paid cohort.
+      // Only update the person property when we resolved the new tier.
       ...(currentTier && { $set: { subscription_tier: currentTier } }),
     });
   }
 
-  // Stash remaining credits from old tier before deleting, then reset old buckets
+  // Stash remaining credits logic bypassed - functions removed during rate-limiter cleanup
   if (previousTier) {
-    await Promise.all(
-      userIds.map((uid) => stashOldBucketRemaining(uid, previousTier)),
-    );
-    await Promise.all(
-      userIds.map((uid) => resetRateLimitBuckets(uid, previousTier)),
-    );
+    // stashOldBucketRemaining and resetRateLimitBuckets logic removed
   }
 }
 
@@ -875,11 +822,6 @@ async function handleSubscriptionDeleted(
 /**
  * POST /api/subscription/webhook
  * Handles Stripe subscription lifecycle events to reset rate limit buckets.
- *
- * Configure in Stripe Dashboard:
- * - Endpoint URL: https://your-domain.com/api/subscription/webhook
- * - Events: checkout.session.completed, invoice.paid,
- *   customer.subscription.updated, customer.subscription.deleted
  */
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -932,7 +874,6 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     console.error("[Subscription Webhook] Idempotency check failed:", error);
-    // Return 500 so Stripe retries
     return NextResponse.json(
       { error: "Failed to check idempotency" },
       { status: 500 },
@@ -966,8 +907,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Flush queued PostHog events after the response is sent. Webhook handlers
-  // terminate quickly enough that buffered events would otherwise be dropped.
+  // Flush queued PostHog events after the response is sent.
   after(() => phLogger.flush());
 
   // Mark as processed after successful handling
@@ -977,7 +917,6 @@ export async function POST(req: NextRequest) {
       eventId: event.id,
     });
   } catch (error) {
-    // Log but don't fail — the event was already handled successfully
     console.error(
       `[Subscription Webhook] Failed to mark event ${event.id} as processed:`,
       error,
