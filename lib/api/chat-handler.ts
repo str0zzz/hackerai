@@ -82,7 +82,7 @@ import {
   createPreemptiveTimeout,
 } from "@/lib/utils/stream-cancellation";
 import { v4 as uuidv4 } from "uuid";
-import { processChatMessages, selectModel } from "@/chat/chat-processor";
+import { processChatMessages, selectModel } from "@/lib/chat/chat-processor";
 import { summarizeIncompleteToolParts } from "@/lib/chat/tool-abort-utils";
 import { createTrackedProvider } from "@/lib/ai/providers";
 import {
