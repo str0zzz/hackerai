@@ -92,7 +92,6 @@ function withReferralCookie(
   return response;
 }
 
-// ഇവിടെ പുതിയ authKitMiddleware രീതിയിലേക്ക് മാറ്റിയിരിക്കുന്നു
 export default authKitMiddleware({
   redirectUri: getRedirectUri(),
   eagerAuth: true,
@@ -135,7 +134,6 @@ export default authKitMiddleware({
     );
   }
 
-  // ലോഗിൻ ചെയ്തിട്ടില്ലെങ്കിൽ WorkOS ഓഥറൈസേഷൻ യുആർഎല്ലിലേക്ക് റീഡയറക്ട് ചെയ്യുന്നു
   return withReferralCookie(
     request,
     NextResponse.redirect(auth.getAuthorizationUrl()),
