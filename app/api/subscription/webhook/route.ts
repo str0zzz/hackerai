@@ -4,7 +4,6 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
 import Stripe from "stripe";
 import {
-  resetRateLimitBuckets,
   popOldBucketRemaining,
   initProratedBucket,
   clearOrgRemovedUsage,
