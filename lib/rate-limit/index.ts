@@ -29,7 +29,6 @@ export {
   checkTokenBucketLimit,
   deductUsage,
   refundUsage,
-  resetRateLimitBuckets,
   popOldBucketRemaining,
   initProratedBucket,
   calculateProratedCredits,
