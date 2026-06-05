@@ -27,7 +27,6 @@ import {
   checkFreeMonthlyCostLimit,
   checkRateLimit,
   recordFreeMonthlyCost,
-  UsageRefundTracker,
 } from "@/lib/rate-limit";
 import {
   BudgetMonitor,
@@ -64,7 +63,7 @@ import {
   estimatePreflightInputTokens,
   getRetryFallbackModel,
 } from "@/lib/api/chat-stream-helpers";
-import { geolocation } from "@vercel/functions";
+import { geolocation } from "@vercelfunctions";
 import { NextRequest } from "next/server";
 import {
   handleInitialChatAndUserMessage,
@@ -131,9 +130,6 @@ export const createChatHandler = () => {
       | ReturnType<typeof createPreemptiveTimeout>
       | undefined;
 
-    // Track usage deductions for refund on error
-    const usageRefundTracker = new UsageRefundTracker();
-
     // Wide event logger for structured logging
     let chatLogger: ChatLogger | undefined;
     let outerChatId: string | undefined;
@@ -184,7 +180,7 @@ export const createChatHandler = () => {
       const { userId, subscription, organizationId } =
         await getUserIDAndPro(req);
       await assertUserCanMakeCostIncurringRequest(userId);
-      usageRefundTracker.setUser(userId, subscription, organizationId);
+
       if (subscription === "free") {
         const lock = await acquireFreeRunConcurrencyLock(
           userId,
@@ -209,7 +205,7 @@ export const createChatHandler = () => {
       });
 
       // Pre-emptive abort fires before Vercel's hard request timeout so we
-      // can flush logs and refund usage; agent mode uses elapsedTimeExceeds.
+      // can flush logs; agent mode uses elapsedTimeExceeds.
       const userStopSignal = new AbortController();
       if (!isAgentMode(mode)) {
         preemptiveTimeout = createPreemptiveTimeout({
@@ -334,8 +330,6 @@ export const createChatHandler = () => {
         subscription === "free"
           ? await checkFreeMonthlyCostLimit(userId)
           : null;
-
-      usageRefundTracker.recordDeductions(rateLimitInfo);
 
       chatLogger.setRateLimit(
         {
@@ -503,7 +497,6 @@ export const createChatHandler = () => {
                   `Failed to upload ${uploadResult.failedCount} ${noun} to the computer. Please try again.`,
                 );
                 preemptiveTimeout?.clear();
-                await usageRefundTracker.refund();
                 chatLogger?.emitChatError(uploadError);
                 throw uploadError;
               }
@@ -633,18 +626,12 @@ export const createChatHandler = () => {
                   rateLimitInfo,
                 });
 
-                const providerCost =
-                  usageTracker.modelProviderCost > 0
-                    ? usageTracker.providerCost
-                    : undefined;
-
                 if (subscription === "free") {
                   await recordFreeMonthlyCost(
                     userId,
                     usageCostRecord.costDollars,
                   );
                 } else {
-                  // deductUsage ഒഴിവാക്കി പകരം ഫ്രീ റൺ ലോക്ക് റിലീസ് ചെയ്യാനും ട്രാക്ക് ചെയ്യാനും മാത്രം സെറ്റ് ചെയ്തു
                   usageTracker.log({
                     userId,
                     organizationId,
@@ -701,7 +688,6 @@ export const createChatHandler = () => {
               getTodoManager,
               ensureSandbox,
               chatLogger,
-              usageRefundTracker,
               getHardTimeoutReason: () =>
                 preemptiveTimeout?.isPreemptive() ? "timeout" : null,
             };
@@ -1406,8 +1392,6 @@ export const createChatHandler = () => {
             ),
           );
       }
-
-      await usageRefundTracker.refund();
 
       if (error instanceof ChatSDKError) {
         chatLogger?.emitChatError(error);
