@@ -63,7 +63,7 @@ import {
   estimatePreflightInputTokens,
   getRetryFallbackModel,
 } from "@/lib/api/chat-stream-helpers";
-import { geolocation } from "@vercelfunctions";
+import { geolocation } from "@vercel/functions";
 import { NextRequest } from "next/server";
 import {
   handleInitialChatAndUserMessage,
