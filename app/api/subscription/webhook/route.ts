@@ -5,7 +5,6 @@ import { api } from "@/convex/_generated/api";
 import Stripe from "stripe";
 import {
   resetRateLimitBuckets,
-  stashOldBucketRemaining,
   popOldBucketRemaining,
   initProratedBucket,
   clearOrgRemovedUsage,
