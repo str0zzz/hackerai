@@ -193,17 +193,10 @@ export const DELETE = async (req: NextRequest) => {
         }
       }
 
-      // Snapshot consumed credits before deletion (bucket is still accessible)
-      const consumed = await getTeamMemberConsumed(membershipToDelete.userId);
-
-      // Delete the membership first — only record debt if deletion succeeds
+      // Rate limiter legacy bucket logic bypassed during Redis cleanup
+      // Delete the membership directly
       await workos.userManagement.deleteOrganizationMembership(membershipId);
 
-      // Record removed member's consumed credits to org counter
-      // so the next new member inherits the "used seat" debt
-      if (consumed > 0) {
-        await addOrgRemovedUsage(organizationId, consumed);
-      }
     } catch (error) {
       // If membership not found, it might be an invitation
       isInvitation = true;
