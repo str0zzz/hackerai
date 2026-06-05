@@ -7,10 +7,10 @@
  * streamText.onFinish, onError, onAbort — so divergence is impossible.
  *
  * Callers supply:
- *  - AgentStreamState   a mutable object; the runner reads and writes it in
- *                       place so callers see every update (finalMessages,
- *                       ctxUsage, stop-flags, finish reason, …).
- *  - AgentStreamContext immutable config + stable dependency references.
+ * - AgentStreamState   a mutable object; the runner reads and writes it in
+ * place so callers see every update (finalMessages,
+ * ctxUsage, stop-flags, finish reason, …).
+ * - AgentStreamContext immutable config + stable dependency references.
  */
 
 import {
@@ -68,7 +68,6 @@ import {
 } from "@/lib/api/openrouter-metadata";
 import type { UsageTracker } from "@/lib/usage-tracker";
 import type { BudgetMonitor } from "@/lib/chat/budget-monitor";
-import type { UsageRefundTracker } from "@/lib/rate-limit";
 import type { SummarizationTracker } from "@/lib/api/chat-stream-helpers";
 import type { ChatLogger } from "@/lib/api/chat-logger";
 import type { createTrackedProvider } from "@/lib/ai/providers";
@@ -187,7 +186,6 @@ export type AgentStreamContext = {
   getTodoManager: () => { getAllTodos: () => import("@/types").Todo[] };
   ensureSandbox: import("@/lib/chat/summarization").EnsureSandbox;
   chatLogger: ChatLogger | undefined;
-  usageRefundTracker: UsageRefundTracker;
 
   /**
    * Platform-specific: return a finish-reason string if a hard platform
@@ -515,7 +513,7 @@ export async function createAgentStream(
           served: state.responseModel,
           chain: fallbackSlugs,
           model: modelName,
-        });
+         });
       }
       ctx.chatLogger?.setStreamResponse(
         state.responseModel,
@@ -546,9 +544,6 @@ export async function createAgentStream(
           subscription: ctx.subscription,
           isTemporary: ctx.temporary,
         });
-      }
-      if (!ctx.usageTracker.hasUsage) {
-        await ctx.usageRefundTracker.refund();
       }
       await ptySessionManager
         .closeAll(ctx.chatId)
