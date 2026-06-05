@@ -1,5 +1,4 @@
 import type { RateLimitInfo, SubscriptionTier } from "@/types";
-import { refundUsage } from "./token-bucket";
 
 /**
  * Tracks usage deductions and handles refunds on error.
@@ -45,27 +44,5 @@ export class UsageRefundTracker {
    * Refund all deducted credits (idempotent - only refunds once).
    * Call this from error handlers to restore credits on failure.
    */
-  async refund(): Promise<void> {
-    if (this.hasRefunded || !this.hasDeductions()) {
-      return;
-    }
-
-    if (!this.userId || !this.subscription) {
-      return;
-    }
-
-    try {
-      await refundUsage(
-        this.userId,
-        this.subscription,
-        this.pointsDeducted,
-        this.extraUsagePointsDeducted,
-        this.organizationId,
-      );
-      this.hasRefunded = true;
-    } catch (error) {
-      console.error("Failed to refund usage:", error);
-      // Flag stays false, allowing retry on transient failures
-    }
-  }
+  
 }
