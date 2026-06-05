@@ -169,17 +169,6 @@ export const POST = async (req: NextRequest) => {
       ),
     );
 
-    // NOTE: deleteUserRateLimitKeys was removed as part of the rate-limiter cleanup.
-    // Keeping this block commented out to prevent build compilation errors.
-    /*
-    await deleteUserRateLimitKeys(userId).catch((err) => {
-      console.warn(
-        "Failed to clear Redis rate-limit keys during account deletion:",
-        err,
-      );
-    });
-    */
-
     // Finally, delete the WorkOS user
     await workos.userManagement.deleteUser(userId);
 
