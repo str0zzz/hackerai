@@ -92,7 +92,7 @@ function withReferralCookie(
   return response;
 }
 
-export default authKitMiddleware({
+export default authkitMiddleware({
   redirectUri: getRedirectUri(),
   eagerAuth: true,
 })(async (auth, request) => {
