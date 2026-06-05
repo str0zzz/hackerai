@@ -92,55 +92,13 @@ function withReferralCookie(
   return response;
 }
 
-// Next.js ആവശ്യപ്പെടുന്ന ആർഗ്യുമെന്റ്സ് കൃത്യമായി പാസ്സ് ചെയ്യാനുള്ള സ്റ്റാൻഡേർഡ് മിഡിൽവെയർ ഫങ്ക്ഷൻ
 export default async function middleware(request: NextRequest, event: NextFetchEvent) {
-  return authkitMiddleware({
+  const middlewareInstance = authkitMiddleware({
     redirectUri: getRedirectUri(),
     eagerAuth: true,
-  })(async (auth) => {
-    const pathname = request.nextUrl.pathname;
+  });
 
-    // Desktop app check
-    if (isDesktopApp(request)) {
-      const hasSession = request.cookies.has("wos-session");
-      if (!hasSession && !isUnauthenticatedPath(pathname)) {
-        return withReferralCookie(
-          request,
-          NextResponse.redirect(
-            new URL("/desktop-callback?error=unauthenticated", request.url),
-          ),
-        );
-      }
-    }
-
-    const { user } = auth;
-
-    if (user || isUnauthenticatedPath(pathname)) {
-      return withReferralCookie(
-        request,
-        NextResponse.next(),
-      );
-    }
-
-    if (!isBrowserRequest(request)) {
-      return withReferralCookie(
-        request,
-        NextResponse.json(
-          {
-            code: "unauthorized:auth",
-            message: "You need to sign in before continuing.",
-            cause: "Session expired or invalid",
-          },
-          { status: 401 },
-        ),
-      );
-    }
-
-    return withReferralCookie(
-      request,
-      NextResponse.redirect(auth.getAuthorizationUrl()),
-    );
-  })(request, event);
+  return middlewareInstance(request, event);
 }
 
 export const config = {
