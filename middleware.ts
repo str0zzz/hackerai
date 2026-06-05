@@ -1,4 +1,4 @@
-import { authKitMiddleware } from "@workos-inc/authkit-nextjs";
+import { authkitMiddleware } from "@workos-inc/authkit-nextjs";
 import { NextRequest, NextResponse, NextFetchEvent } from "next/server";
 import { isRateLimitError } from "@/lib/api/response";
 import {
