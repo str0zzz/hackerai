@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "../stripe";
 import { workos } from "../workos";
 import { getUserIDWithFreshLogin } from "@/lib/auth/get-user-id";
-import { deleteUserRateLimitKeys } from "@/lib/rate-limit/token-bucket";
 import { ChatSDKError } from "@/lib/errors";
 
 type OrganizationMembership = Awaited<
